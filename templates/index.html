@@ -3,23 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <title>Sign Language Translator</title>
-    <link href="{{url_for('static', filename = 'style.css')}}" rel="stylesheet">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
     <script src='https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.0/socket.io.min.js'></script>
+    <style>
+        .ex-layout {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .gnb {
+            padding: 20px;
+            background-color: #333;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .main {
+            flex-grow: 1;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+
+        #container {
+            position: relative;
+            width: 640px;
+        }
+
+        #videoElement {
+            width: 640px;
+            height: 480px;
+            background-color: #666;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .prediction-container {
+            margin: 10px 0;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 5px;
+            border-radius: 5px;
+        }
+
+        .prediction-label {
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .prediction-bar {
+            height: 20px;
+            transition: width 0.3s ease;
+            color: white;
+            text-align: right;
+            padding-right: 5px;
+            line-height: 20px;
+            border-radius: 3px;
+            width: 0;
+        }
+
+        .footer {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+
+        #result {
+            width: 100%;
+            height: 80px;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            resize: none;
+        }
+
+        .button, .button2, .button3 {
+            padding: 8px 15px;
+            border-radius: 5px;
+            text-decoration: none;
+            color: white;
+            margin: 0 5px;
+            cursor: pointer;
+            border: none;
+            font-size: 14px;
+        }
+
+        .button { background-color: #4CAF50; }
+        .button:hover { background-color: #45a049; }
+
+        .button2 { background-color: #f44336; }
+        .button2:hover { background-color: #da190b; }
+
+        .button3 { background-color: #2196F3; }
+        .button3:hover { background-color: #0b7dda; }
+
+        .status-indicator {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 5px 10px;
+            border-radius: 3px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 12px;
+            z-index: 2;
+        }
+
+        #predictions {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            width: calc(100% - 20px);
+            z-index: 2;
+        }
+    </style>
 </head>
 <body>
     <div class="ex-layout">
-        <div class="gnb">Sign Language Translator
+        <div class="gnb">
+            Sign Language Translator
             <div class="item last">
-                <a href="#" onclick="startCapture()" class="button" id="startBtn">Start (S)</a>
-                <a href="#" onclick="retryPrediction()" class="button2" id="retryBtn">Retry (R)</a>
-                <a href="#" onclick="finishCapture()" class="button3" id="finishBtn">Finish (F)</a>
+                <button onclick="startCapture()" class="button" id="startBtn">Start (S)</button>
+                <button onclick="retryPrediction()" class="button2" id="retryBtn">Retry (R)</button>
+                <button onclick="finishCapture()" class="button3" id="finishBtn">Finish (F)</button>
             </div>
         </div>
         <div class="main">
             <div id="container">
                 <video autoplay playsinline id="videoElement"></video>
                 <canvas id="canvas" width="640" height="480"></canvas>
+                <div id="status" class="status-indicator">Waiting to start...</div>
                 <div id="predictions">
                     <div class="prediction-container">
                         <div class="prediction-label" id="label1"></div>
@@ -34,28 +157,30 @@
                         <div class="prediction-bar" id="pred3"></div>
                     </div>
                 </div>
-                <div id="current_sentence"></div>
             </div>
         </div>
         <div class="footer">
-            <textarea id="result" readonly></textarea>
+            <textarea id="result" readonly placeholder="Translated text will appear here..."></textarea>
         </div>
     </div>
-    <script type="text/javascript" charset="utf-8">
+
+    <script type="text/javascript">
         var socket = io.connect(window.location.protocol + '//' + document.domain + ':' + location.port);
         var canvas = document.getElementById('canvas');
         var context = canvas.getContext('2d');
         const video = document.querySelector("#videoElement");
+        const status = document.getElementById('status');
         let isStarted = false;
+        let frameRequestId = null;
         
         video.width = 640;
         video.height = 480;
 
         socket.on('connect', function() {
-            console.log("Connected!", socket.connected);
+            console.log("Connected to server");
+            status.textContent = "Connected to server";
         });
 
-        // Handle keyboard shortcuts
         document.addEventListener('keydown', function(event) {
             switch(event.key.toLowerCase()) {
                 case 's':
@@ -72,32 +197,37 @@
 
         function startCapture() {
             if (!isStarted) {
-                if (navigator.mediaDevices.getUserMedia) {
-                    navigator.mediaDevices.getUserMedia({ video: true })
-                        .then(function (stream) {
-                            video.srcObject = stream;
-                            video.play();
-                            isStarted = true;
-                            document.getElementById('result').value = "Translation started.";
-                            captureFrames();
-                        })
-                        .catch(function (error) {
-                            console.error("Error accessing webcam:", error);
-                        });
-                }
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(function (stream) {
+                        video.srcObject = stream;
+                        video.play();
+                        isStarted = true;
+                        status.textContent = "Recording...";
+                        document.getElementById('result').value = "Translation started.";
+                        captureFrames();
+                    })
+                    .catch(function (error) {
+                        console.error("Error accessing webcam:", error);
+                        status.textContent = "Error: Cannot access webcam";
+                    });
             }
         }
 
         function retryPrediction() {
             socket.emit('delete_word');
+            status.textContent = "Retrying...";
         }
 
         function finishCapture() {
             if (isStarted) {
                 isStarted = false;
+                if (frameRequestId) {
+                    cancelAnimationFrame(frameRequestId);
+                }
                 const tracks = video.srcObject.getTracks();
                 tracks.forEach(track => track.stop());
                 video.srcObject = null;
+                status.textContent = "Finished";
                 console.log("Final sentence:", document.getElementById('result').value);
             }
         }
@@ -122,7 +252,7 @@
             const frame = canvas.toDataURL('image/jpeg', 0.5);
             socket.emit('frame', frame);
 
-            requestAnimationFrame(captureFrames);
+            frameRequestId = requestAnimationFrame(captureFrames);
         }
 
         socket.on('predictions', function(data) {
@@ -133,56 +263,20 @@
                 document.getElementById('result').value = data.sentence;
             }
         });
+
+        socket.on('disconnect', function() {
+            status.textContent = "Disconnected from server";
+            isStarted = false;
+            if (frameRequestId) {
+                cancelAnimationFrame(frameRequestId);
+            }
+        });
+
+        window.onbeforeunload = function() {
+            if (isStarted) {
+                finishCapture();
+            }
+        };
     </script>
-
-    <style>
-        .prediction-container {
-            margin: 10px 0;
-        }
-
-        .prediction-label {
-            margin-bottom: 5px;
-            font-size: 14px;
-        }
-
-        .prediction-bar {
-            height: 20px;
-            background-color: #4CAF50;
-            transition: width 0.3s ease;
-            color: white;
-            text-align: right;
-            padding-right: 5px;
-            line-height: 20px;
-            border-radius: 3px;
-            width: 0;
-        }
-
-        #current_sentence {
-            margin-top: 10px;
-            padding: 10px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-        }
-
-        #result {
-            width: 100%;
-            height: 100px;
-            margin-top: 10px;
-            padding: 10px;
-            font-size: 16px;
-        }
-
-        .button, .button2, .button3 {
-            margin: 0 5px;
-            padding: 8px 15px;
-            border-radius: 5px;
-            text-decoration: none;
-            color: white;
-        }
-
-        .button { background-color: #4CAF50; }
-        .button2 { background-color: #f44336; }
-        .button3 { background-color: #2196F3; }
-    </style>
 </body>
 </html>
