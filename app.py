@@ -20,36 +20,46 @@ mp_holistic = mp.solutions.holistic
 holistic = mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
 # Sign language labels
-SIGN_LABELS = {
-    0: 'here', 1: 'there', 2: 'go', 3: 'time', 4: 'correct', 
-    # ... (rest of the labels)
-}
+ORD2SIGN2 = {0: 'here', 1: 'there', 2: 'go', 3: 'time', 4: 'correct', 5: 'taxi', 6: 'money',
+             7: 'confirm', 8: 'become', 9: 'card', 10: 'subway', 11: 'Myeongdong', 12: 'Songpa',
+             13: 'train', 14: 'arrive', 15: 'place', 16: 'next', 17: 'get off', 18: 'what',
+             19: 'not work', 20: 'destination', 21: 'bus', 22: 'none', 23: 'see', 24: 'police',
+             25: 'school', 26: 'intersection', 27: 'cross', 28: 'traffic light', 29: 'right turn',
+             30: 'before', 31: 'left turn', 32: 'shortcut', 33: 'Jongno', 34: 'method',
+             35: 'hospital', 36: 'find', 37: 'road', 38: 'missing', 39: 'bank', 40: 'lose',
+             41: 'air conditioner', 42: 'locker', 43: 'defective', 44: 'broken', 45: 'well',
+             46: 'use', 47: 'impossible', 48: 'airport', 49: 'alley', 50: 'okay', 51: 'City Hall',
+             52: 'turn on', 53: 'vending machine', 54: 'die'}
 
-SEQUENCE_LENGTH = 30
+LENGTH = 30
 current_sequence = []
+predicted_sentence = ["Start"]
 
 def extract_keypoints(results):
-    face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
-    pose = np.array([[res.x, res.y, res.z] for res in results.pose_landmarks.landmark]).flatten() if results.pose_landmarks else np.zeros(33*3)
-    lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]).flatten() if results.left_hand_landmarks else np.zeros(21*3)
-    rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]).flatten() if results.right_hand_landmarks else np.zeros(21*3)
-    return np.concatenate([face, pose, lh, rh])
+    face = [[res.x, res.y, res.z] for res in results.face_landmarks.landmark] if results.face_landmarks else [
+        [None, None, None] for _ in range(468)]
+    pose = [[res.x, res.y, res.z] for res in results.pose_landmarks.landmark] if results.pose_landmarks else [
+        [None, None, None] for _ in range(33)]
+    lh = [[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark] if results.left_hand_landmarks else [
+        [None, None, None] for _ in range(21)]
+    rh = [[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark] if results.right_hand_landmarks else [
+        [None, None, None] for _ in range(21)]
+    return face + lh + pose + rh
 
-def get_top3_predictions(prediction):
-    outputs = prediction['outputs']
-    top3_idx = np.argsort(outputs)[-3:][::-1]
-    probs = np.exp(outputs[top3_idx]) / np.sum(np.exp(outputs))
+
+def get_top3(prediction):
+    top3_idx = np.argsort(prediction['outputs'])[-3:][::-1]
+    top3_probs = np.exp(prediction['outputs'][top3_idx]) / \
+        np.sum(np.exp(prediction['outputs']))
     
-    predictions = []
-    for idx, prob in zip(top3_idx, probs):
-        predictions.append({
-            'word': SIGN_LABELS[idx],
-            'probability': float(prob)
-        })
-    return predictions
+    top3_words = []
+    for idx in top3_idx:
+        top3_words.append(ORD2SIGN2[idx])
+
+    return top3_words, top3_probs
 
 def process_frame(frame_data):
-    global current_sequence
+    global current_sequence, predicted_sentence
 
     # Convert base64 to image
     _, encoded = frame_data.split(",", 1)
@@ -61,21 +71,32 @@ def process_frame(frame_data):
     results = holistic.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     frame.flags.writeable = True
 
-    # Extract keypoints if hands are detected
     if results.left_hand_landmarks or results.right_hand_landmarks:
         keypoints = extract_keypoints(results)
         current_sequence.append(keypoints)
-        current_sequence = current_sequence[-SEQUENCE_LENGTH:]
-        
-        # Make prediction if we have enough frames
-        if len(current_sequence) == SEQUENCE_LENGTH:
+        current_sequence = current_sequence[-LENGTH:]
+        return None, None
+    else:
+        if len(current_sequence) == LENGTH:
             sequence_np = np.array(current_sequence, dtype=np.float32)
             prediction = prediction_fn(inputs=sequence_np)
-            predictions = get_top3_predictions(prediction)
+
+            top3_words, top3_probs = get_top3(prediction)
+
+            predictions = []
+            for word, prob in zip(top3_words, top3_probs):
+                predictions.append({
+                    'word': word,
+                    'probability': float(prob)
+                })
+
+            if prediction['outputs'].max() > 1:  # Confidence threshold
+                most_likely_word = top3_words[0]
+                if most_likely_word != predicted_sentence[-1]:
+                    predicted_sentence.append(most_likely_word)
+                return predictions, most_likely_word
             
-            # Check if top prediction is confident enough
-            if predictions[0]['probability'] > 0.7:  # Confidence threshold
-                return predictions, predictions[0]['word']
+            current_sequence.clear()
             return predictions, None
             
     return None, None
@@ -90,12 +111,15 @@ def handle_frame(frame_data):
     if predictions:
         emit('predictions', {
             'predictions': predictions,
-            'final_word': final_word
+            'final_word': final_word,
+            'sentence': ' '.join(predicted_sentence)
         })
 
 @socketio.on('delete_word')
 def handle_delete():
-    global current_sequence
+    global current_sequence, predicted_sentence
+    if len(predicted_sentence) > 1:  # Keep "Start" in the list
+        predicted_sentence.pop()
     current_sequence = []
 
 if __name__ == '__main__':

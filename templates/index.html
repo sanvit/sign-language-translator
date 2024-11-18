@@ -6,15 +6,14 @@
     <link href="{{url_for('static', filename = 'style.css')}}" rel="stylesheet">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
     <script src='https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.0/socket.io.js'></script>
-    <script src="{{ url_for('static', filename = 'face-api.min.js') }}"></script>
 </head>
 <body>
     <div class="ex-layout">
         <div class="gnb">Sign Language Translator
             <div class="item last">
-                <a href="#" onclick="start()" class="button">Start</a>
-                <a href="#" class="button2">Delete Word</a>
-                <a href="#" class="button3">Translate</a>
+                <a href="#" onclick="startCapture()" class="button" id="startBtn">Start (S)</a>
+                <a href="#" onclick="retryPrediction()" class="button2" id="retryBtn">Retry (R)</a>
+                <a href="#" onclick="finishCapture()" class="button3" id="finishBtn">Finish (F)</a>
             </div>
         </div>
         <div class="main">
@@ -22,15 +21,24 @@
                 <video autoplay playsinline id="videoElement"></video>
                 <canvas id="canvas" width="640" height="480"></canvas>
                 <div id="predictions">
-                    <div class="prediction-bar" id="pred1"></div>
-                    <div class="prediction-bar" id="pred2"></div>
-                    <div class="prediction-bar" id="pred3"></div>
+                    <div class="prediction-container">
+                        <div class="prediction-label" id="label1"></div>
+                        <div class="prediction-bar" id="pred1"></div>
+                    </div>
+                    <div class="prediction-container">
+                        <div class="prediction-label" id="label2"></div>
+                        <div class="prediction-bar" id="pred2"></div>
+                    </div>
+                    <div class="prediction-container">
+                        <div class="prediction-label" id="label3"></div>
+                        <div class="prediction-bar" id="pred3"></div>
+                    </div>
                 </div>
-                <div id="frame_count"></div>
+                <div id="current_sentence"></div>
             </div>
         </div>
         <div class="footer">
-            <textarea id="result"></textarea>
+            <textarea id="result" readonly></textarea>
         </div>
     </div>
     <script type="text/javascript" charset="utf-8">
@@ -38,8 +46,6 @@
         var canvas = document.getElementById('canvas');
         var context = canvas.getContext('2d');
         const video = document.querySelector("#videoElement");
-        const frameCount = document.getElementById('frame_count');
-        let sequence = [];
         let isStarted = false;
         
         video.width = 640;
@@ -49,30 +55,64 @@
             console.log("Connected!", socket.connected);
         });
 
-        function start() {
-            if (navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ video: true })
-                    .then(function (stream) {
-                        video.srcObject = stream;
-                        video.play();
-                        isStarted = true;
-                        document.getElementById('result').value = "Translation started.";
-                        captureFrames();
-                    })
-                    .catch(function (error) {
-                        console.error("Error accessing webcam:", error);
-                    });
+        // Handle keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            switch(event.key.toLowerCase()) {
+                case 's':
+                    startCapture();
+                    break;
+                case 'r':
+                    retryPrediction();
+                    break;
+                case 'f':
+                    finishCapture();
+                    break;
+            }
+        });
+
+        function startCapture() {
+            if (!isStarted) {
+                if (navigator.mediaDevices.getUserMedia) {
+                    navigator.mediaDevices.getUserMedia({ video: true })
+                        .then(function (stream) {
+                            video.srcObject = stream;
+                            video.play();
+                            isStarted = true;
+                            document.getElementById('result').value = "Translation started.";
+                            captureFrames();
+                        })
+                        .catch(function (error) {
+                            console.error("Error accessing webcam:", error);
+                        });
+                }
+            }
+        }
+
+        function retryPrediction() {
+            socket.emit('delete_word');
+        }
+
+        function finishCapture() {
+            if (isStarted) {
+                isStarted = false;
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
+                console.log("Final sentence:", document.getElementById('result').value);
             }
         }
 
         function updatePredictionBars(predictions) {
-            for (let i = 0; i < 3; i++) {
+            const colors = ['#4CAF50', '#2196F3', '#FFC107'];
+            predictions.forEach((pred, i) => {
                 const bar = document.getElementById(`pred${i+1}`);
-                const width = predictions[i].probability * 100;
+                const label = document.getElementById(`label${i+1}`);
+                const width = pred.probability * 100;
+                
                 bar.style.width = width + '%';
-                bar.textContent = `${predictions[i].word} (${width.toFixed(1)}%)`;
-                bar.style.backgroundColor = i === 0 ? '#4CAF50' : i === 1 ? '#2196F3' : '#FFC107';
-            }
+                bar.style.backgroundColor = colors[i];
+                label.textContent = `${pred.word} (${width.toFixed(1)}%)`;
+            });
         }
 
         function captureFrames() {
@@ -86,21 +126,63 @@
         }
 
         socket.on('predictions', function(data) {
-            updatePredictionBars(data.predictions);
-            if (data.final_word) {
-                const resultArea = document.getElementById('result');
-                resultArea.value += ' ' + data.final_word;
+            if (data.predictions) {
+                updatePredictionBars(data.predictions);
+            }
+            if (data.sentence) {
+                document.getElementById('result').value = data.sentence;
             }
         });
-
-        const deleteButton = document.querySelector(".button2");
-        deleteButton.onclick = function() {
-            const resultArea = document.getElementById('result');
-            const words = resultArea.value.trim().split(' ');
-            words.pop();
-            resultArea.value = words.join(' ');
-            socket.emit('delete_word');
-        };
     </script>
+
+    <style>
+        .prediction-container {
+            margin: 10px 0;
+        }
+
+        .prediction-label {
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .prediction-bar {
+            height: 20px;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+            color: white;
+            text-align: right;
+            padding-right: 5px;
+            line-height: 20px;
+            border-radius: 3px;
+            width: 0;
+        }
+
+        #current_sentence {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+
+        #result {
+            width: 100%;
+            height: 100px;
+            margin-top: 10px;
+            padding: 10px;
+            font-size: 16px;
+        }
+
+        .button, .button2, .button3 {
+            margin: 0 5px;
+            padding: 8px 15px;
+            border-radius: 5px;
+            text-decoration: none;
+            color: white;
+        }
+
+        .button { background-color: #4CAF50; }
+        .button2 { background-color: #f44336; }
+        .button3 { background-color: #2196F3; }
+    </style>
 </body>
 </html>
