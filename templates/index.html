@@ -106,12 +106,15 @@
 
         .button { background-color: #4CAF50; }
         .button:hover { background-color: #45a049; }
+        .button:disabled { background-color: #cccccc; cursor: not-allowed; }
 
         .button2 { background-color: #f44336; }
         .button2:hover { background-color: #da190b; }
+        .button2:disabled { background-color: #cccccc; cursor: not-allowed; }
 
         .button3 { background-color: #2196F3; }
         .button3:hover { background-color: #0b7dda; }
+        .button3:disabled { background-color: #cccccc; cursor: not-allowed; }
 
         .status-indicator {
             position: absolute;
@@ -132,6 +135,14 @@
             width: calc(100% - 20px);
             z-index: 2;
         }
+
+        #loadingProgress {
+            height: 20px;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+            border-radius: 3px;
+            width: 0;
+        }
     </style>
 </head>
 <body>
@@ -139,17 +150,20 @@
         <div class="gnb">
             Sign Language Translator
             <div class="item last">
-                <button onclick="startCapture()" class="button" id="startBtn">Start (S)</button>
-                <!-- <button onclick="retryPrediction()" class="button2" id="retryBtn">Retry (R)</button> -->
-                <button onclick="finishCapture()" class="button3" id="finishBtn">Finish (F)</button>
+                <button onclick="startCapture()" class="button" id="startBtn" disabled>Start (S)</button>
+                <button onclick="finishCapture()" class="button3" id="finishBtn" disabled>Finish (F)</button>
             </div>
         </div>
         <div class="main">
             <div id="container">
                 <video autoplay playsinline id="videoElement"></video>
                 <canvas id="canvas"></canvas>
-                <div id="status" class="status-indicator">Waiting to start...</div>
+                <div id="status" class="status-indicator">Loading model...</div>
                 <div id="predictions">
+                    <div class="prediction-container">
+                        <div class="prediction-label">Model Loading Progress</div>
+                        <div id="loadingProgress"></div>
+                    </div>
                     <div class="prediction-container">
                         <div class="prediction-label" id="label1"></div>
                         <div class="prediction-bar" id="pred1"></div>
@@ -176,11 +190,63 @@
         const canvasElement = document.querySelector("#canvas");
         const canvasCtx = canvasElement.getContext("2d");
         const status = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const finishBtn = document.getElementById('finishBtn');
+        const loadingProgress = document.getElementById('loadingProgress');
         let isStarted = false;
         let holistic = null;
 
         canvasElement.width = 640;
         canvasElement.height = 480;
+
+        // Initialize holistic model first
+        async function initializeHolistic() {
+            holistic = new Holistic({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+                }
+            });
+
+            holistic.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            // Set up progress monitoring
+            let totalFiles = 0;
+            let loadedFiles = 0;
+
+            holistic.onProgress = (packet) => {
+                if (packet.totalFiles) {
+                    totalFiles = packet.totalFiles;
+                }
+                if (packet.loadedFiles) {
+                    loadedFiles = packet.loadedFiles;
+                    const progress = (loadedFiles / totalFiles) * 100;
+                    loadingProgress.style.width = progress + '%';
+                    status.textContent = `Loading model... ${Math.round(progress)}%`;
+                }
+            };
+
+            await holistic.initialize();
+            
+            // Enable buttons after model is loaded
+            startBtn.disabled = false;
+            finishBtn.disabled = false;
+            status.textContent = "Model loaded. Ready to start.";
+            loadingProgress.style.width = '100%';
+            
+            // Set up the results handler
+            holistic.onResults(onResults);
+        }
+
+        // Start loading the model immediately
+        initializeHolistic().catch(error => {
+            console.error("Error loading model:", error);
+            status.textContent = "Error loading model";
+        });
 
         function onResults(results) {
             if (!isStarted) return;
@@ -189,7 +255,6 @@
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-            // Draw face landmarks
             if (results.faceLandmarks) {
                 drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_TESSELATION,
                     {color: '#C0C0C070', lineWidth: 1});
@@ -207,7 +272,6 @@
                     {color: '#E0E0E0'});
             }
 
-            // Draw pose
             if (results.poseLandmarks) {
                 drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
                     {color: '#00FF00', lineWidth: 4});
@@ -215,7 +279,6 @@
                     {color: '#FF0000', lineWidth: 2});
             }
 
-            // Draw hands
             if (results.leftHandLandmarks) {
                 drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS,
                     {color: '#CC0000', lineWidth: 5});
@@ -231,7 +294,6 @@
 
             canvasCtx.restore();
 
-            // Extract and send keypoints
             if (results.faceLandmarks || results.leftHandLandmarks || 
                 results.rightHandLandmarks || results.poseLandmarks) {
                 const keypoints = {
@@ -245,22 +307,7 @@
         }
 
         function startCapture() {
-            if (!isStarted) {
-                holistic = new Holistic({
-                    locateFile: (file) => {
-                        return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
-                    }
-                });
-
-                holistic.setOptions({
-                    modelComplexity: 1,
-                    smoothLandmarks: true,
-                    minDetectionConfidence: 0.5,
-                    minTrackingConfidence: 0.5
-                });
-
-                holistic.onResults(onResults);
-
+            if (!isStarted && holistic) {
                 const camera = new Camera(videoElement, {
                     onFrame: async () => {
                         if (isStarted) {
@@ -284,17 +331,9 @@
             }
         }
 
-        function retryPrediction() {
-            socket.emit('delete_word');
-            status.textContent = "Retrying...";
-        }
-
         function finishCapture() {
             if (isStarted) {
                 isStarted = false;
-                if (holistic) {
-                    holistic.close();
-                }
                 const tracks = videoElement.srcObject.getTracks();
                 tracks.forEach(track => track.stop());
                 videoElement.srcObject = null;
@@ -326,16 +365,15 @@
         });
 
         document.addEventListener('keydown', function(event) {
-            switch(event.key.toLowerCase()) {
-                case 's':
-                    startCapture();
-                    break;
-                case 'r':
-                    retryPrediction();
-                    break;
-                case 'f':
-                    finishCapture();
-                    break;
+            if (!startBtn.disabled) {
+                switch(event.key.toLowerCase()) {
+                    case 's':
+                        startCapture();
+                        break;
+                    case 'f':
+                        finishCapture();
+                        break;
+                }
             }
         });
 
