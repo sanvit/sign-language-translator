@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import cv2
 import numpy as np
@@ -16,13 +16,8 @@ socketio = SocketIO(app, cors_allowed_origins='*')
 interpreter = tf.lite.Interpreter(model_path="model_fold0_55.tflite")
 prediction_fn = interpreter.get_signature_runner("serving_default")
 
-# MediaPipe initialization
+# MediaPipe initialization - moved to session handling
 mp_holistic = mp.solutions.holistic
-holistic = mp_holistic.Holistic(
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5,
-    smooth_landmarks=True  # Enable landmark smoothing
-)
 
 # Sign language labels
 ORD2SIGN2 = {0: 'here', 1: 'there', 2: 'go', 3: 'time', 4: 'correct', 5: 'taxi', 6: 'money',
@@ -42,6 +37,8 @@ predicted_sentence = ["Start"]
 last_process_time = 0
 PROCESS_INTERVAL = 1.0 / 30  # 30 FPS
 
+# Store holistic instance per session
+holistic_instances = {}
 
 def extract_keypoints(results):
     face = [[res.x, res.y, res.z] for res in results.face_landmarks.landmark] if results.face_landmarks else [
@@ -53,7 +50,6 @@ def extract_keypoints(results):
     rh = [[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark] if results.right_hand_landmarks else [
         [None, None, None] for _ in range(21)]
     return face + lh + pose + rh
-
 
 def get_top3(prediction):
     top3_idx = np.argsort(prediction['outputs'])[-3:][::-1]
@@ -67,7 +63,18 @@ def get_top3(prediction):
     return top3_words, top3_probs
 
 
-def process_frame(frame_data):
+@socketio.on('connect')
+def handle_connect():
+    session_id = request.sid
+    holistic_instances[session_id] = mp_holistic.Holistic(
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+        smooth_landmarks=True
+    )
+    print(f"New client connected. Session ID: {session_id}")
+
+
+def process_frame(frame_data, session_id):
     global current_sequence, predicted_sentence, last_process_time
 
     current_time = time.time()
@@ -77,6 +84,12 @@ def process_frame(frame_data):
     last_process_time = current_time
 
     try:
+        # Get the holistic instance for this session
+        holistic = holistic_instances.get(session_id)
+        if not holistic:
+            print(f"No holistic instance for session {session_id}")
+            return None, None
+
         # Convert base64 to image
         _, encoded = frame_data.split(",", 1)
         frame = np.array(Image.open(io.BytesIO(base64.b64decode(encoded))))
@@ -84,7 +97,8 @@ def process_frame(frame_data):
 
         # Process with MediaPipe
         frame.flags.writeable = False
-        results = holistic.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = holistic.process(frame_rgb)
         frame.flags.writeable = True
 
         if results.left_hand_landmarks or results.right_hand_landmarks:
@@ -120,22 +134,20 @@ def process_frame(frame_data):
         print(f"Error processing frame: {str(e)}")
         return None, None
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
 
-
 @socketio.on('frame')
 def handle_frame(frame_data):
-    predictions, final_word = process_frame(frame_data)
+    session_id = request.sid
+    predictions, final_word = process_frame(frame_data, session_id)
     if predictions:
         emit('predictions', {
             'predictions': predictions,
             'final_word': final_word,
             'sentence': ' '.join(predicted_sentence)
         })
-
 
 @socketio.on('delete_word')
 def handle_delete():
@@ -144,14 +156,28 @@ def handle_delete():
         predicted_sentence.pop()
     current_sequence = []
 
-
 @socketio.on('disconnect')
 def handle_disconnect():
     global current_sequence, predicted_sentence
+    session_id = request.sid
+    if session_id in holistic_instances:
+        holistic_instances[session_id].close()
+        del holistic_instances[session_id]
     current_sequence = []
     predicted_sentence = ["Start"]
-    holistic.close()
+    print(f"Client disconnected. Session ID: {session_id}")
 
+
+@socketio.on('start_session')
+def handle_start_session():
+    session_id = request.sid
+    if session_id not in holistic_instances:
+        holistic_instances[session_id] = mp_holistic.Holistic(
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            smooth_landmarks=True
+        )
+    emit('session_started', {'status': 'success'})
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
