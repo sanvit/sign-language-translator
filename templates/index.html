@@ -5,6 +5,10 @@
     <title>Sign Language Translator</title>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
     <script src='https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.0/socket.io.min.js'></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
     <style>
         .ex-layout {
             display: flex;
@@ -39,6 +43,7 @@
             width: 640px;
             height: 480px;
             background-color: #666;
+            transform: scaleX(-1);
         }
 
         #canvas {
@@ -46,6 +51,7 @@
             top: 0;
             left: 0;
             z-index: 1;
+            transform: scaleX(-1);
         }
 
         .prediction-container {
@@ -141,7 +147,7 @@
         <div class="main">
             <div id="container">
                 <video autoplay playsinline id="videoElement"></video>
-                <canvas id="canvas" width="640" height="480"></canvas>
+                <canvas id="canvas"></canvas>
                 <div id="status" class="status-indicator">Waiting to start...</div>
                 <div id="predictions">
                     <div class="prediction-container">
@@ -166,48 +172,113 @@
 
     <script type="text/javascript">
         var socket = io.connect(window.location.protocol + '//' + document.domain + ':' + location.port);
-        var canvas = document.getElementById('canvas');
-        var context = canvas.getContext('2d');
-        const video = document.querySelector("#videoElement");
+        const videoElement = document.querySelector("#videoElement");
+        const canvasElement = document.querySelector("#canvas");
+        const canvasCtx = canvasElement.getContext("2d");
         const status = document.getElementById('status');
         let isStarted = false;
-        let frameRequestId = null;
-        
-        video.width = 640;
-        video.height = 480;
+        let holistic = null;
 
-        socket.on('connect', function() {
-            console.log("Connected to server");
-            status.textContent = "Connected to server";
-        });
+        canvasElement.width = 640;
+        canvasElement.height = 480;
 
-        document.addEventListener('keydown', function(event) {
-            switch(event.key.toLowerCase()) {
-                case 's':
-                    startCapture();
-                    break;
-                case 'r':
-                    retryPrediction();
-                    break;
-                case 'f':
-                    finishCapture();
-                    break;
+        function onResults(results) {
+            if (!isStarted) return;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            // Draw face landmarks
+            if (results.faceLandmarks) {
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_TESSELATION,
+                    {color: '#C0C0C070', lineWidth: 1});
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_RIGHT_EYE,
+                    {color: '#FF3030'});
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_RIGHT_EYEBROW,
+                    {color: '#FF3030'});
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LEFT_EYE,
+                    {color: '#30FF30'});
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LEFT_EYEBROW,
+                    {color: '#30FF30'});
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_FACE_OVAL,
+                    {color: '#E0E0E0'});
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LIPS,
+                    {color: '#E0E0E0'});
             }
-        });
+
+            // Draw pose
+            if (results.poseLandmarks) {
+                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
+                    {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(canvasCtx, results.poseLandmarks,
+                    {color: '#FF0000', lineWidth: 2});
+            }
+
+            // Draw hands
+            if (results.leftHandLandmarks) {
+                drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS,
+                    {color: '#CC0000', lineWidth: 5});
+                drawLandmarks(canvasCtx, results.leftHandLandmarks,
+                    {color: '#00FF00', lineWidth: 2});
+            }
+            if (results.rightHandLandmarks) {
+                drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS,
+                    {color: '#00CC00', lineWidth: 5});
+                drawLandmarks(canvasCtx, results.rightHandLandmarks,
+                    {color: '#FF0000', lineWidth: 2});
+            }
+
+            canvasCtx.restore();
+
+            // Extract and send keypoints
+            if (results.faceLandmarks || results.leftHandLandmarks || 
+                results.rightHandLandmarks || results.poseLandmarks) {
+                const keypoints = {
+                    face: results.faceLandmarks || [],
+                    pose: results.poseLandmarks || [],
+                    leftHand: results.leftHandLandmarks || [],
+                    rightHand: results.rightHandLandmarks || []
+                };
+                socket.emit('keypoints', keypoints);
+            }
+        }
 
         function startCapture() {
             if (!isStarted) {
-                navigator.mediaDevices.getUserMedia({ video: true })
-                    .then(function (stream) {
-                        video.srcObject = stream;
-                        video.play();
+                holistic = new Holistic({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+                    }
+                });
+
+                holistic.setOptions({
+                    modelComplexity: 1,
+                    smoothLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                holistic.onResults(onResults);
+
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        if (isStarted) {
+                            await holistic.send({image: videoElement});
+                        }
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                camera.start()
+                    .then(() => {
                         isStarted = true;
                         status.textContent = "Recording...";
                         document.getElementById('result').value = "Translation started.";
-                        captureFrames();
                     })
-                    .catch(function (error) {
-                        console.error("Error accessing webcam:", error);
+                    .catch((error) => {
+                        console.error("Error starting camera:", error);
                         status.textContent = "Error: Cannot access webcam";
                     });
             }
@@ -221,12 +292,12 @@
         function finishCapture() {
             if (isStarted) {
                 isStarted = false;
-                if (frameRequestId) {
-                    cancelAnimationFrame(frameRequestId);
+                if (holistic) {
+                    holistic.close();
                 }
-                const tracks = video.srcObject.getTracks();
+                const tracks = videoElement.srcObject.getTracks();
                 tracks.forEach(track => track.stop());
-                video.srcObject = null;
+                videoElement.srcObject = null;
                 status.textContent = "Finished";
                 console.log("Final sentence:", document.getElementById('result').value);
             }
@@ -245,16 +316,6 @@
             });
         }
 
-        function captureFrames() {
-            if (!isStarted) return;
-
-            context.drawImage(video, 0, 0, video.width, video.height);
-            const frame = canvas.toDataURL('image/jpeg', 0.5);
-            socket.emit('frame', frame);
-
-            frameRequestId = requestAnimationFrame(captureFrames);
-        }
-
         socket.on('predictions', function(data) {
             if (data.predictions) {
                 updatePredictionBars(data.predictions);
@@ -264,26 +325,19 @@
             }
         });
 
-        socket.on('disconnect', function() {
-            status.textContent = "Disconnected from server";
-            isStarted = false;
-            if (frameRequestId) {
-                cancelAnimationFrame(frameRequestId);
+        document.addEventListener('keydown', function(event) {
+            switch(event.key.toLowerCase()) {
+                case 's':
+                    startCapture();
+                    break;
+                case 'r':
+                    retryPrediction();
+                    break;
+                case 'f':
+                    finishCapture();
+                    break;
             }
         });
-
-        socket.on('connect', function() {
-            console.log("Connected to server");
-            status.textContent = "Connected to server";
-            socket.emit('start_session');  // Request new session initialization
-        });
-        
-        socket.on('session_started', function(data) {
-            if (data.status === 'success') {
-                status.textContent = "Session initialized";
-                console.log("Session initialized successfully");
-            }
-        });        
 
         window.onbeforeunload = function() {
             if (isStarted) {
