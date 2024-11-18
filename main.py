@@ -39,6 +39,7 @@ def format_keypoints(keypoint_data):
           ] if keypoint_data['rightHand'] else [[None, None, None] for _ in range(21)]
     return face + lh + pose + rh
 
+
 def get_top3(prediction):
     top3_idx = np.argsort(prediction['outputs'])[-3:][::-1]
     top3_probs = np.exp(prediction['outputs'][top3_idx]) / \
@@ -54,6 +55,7 @@ def get_top3(prediction):
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @socketio.on('connect')
 def handle_connect():
@@ -101,6 +103,7 @@ def handle_keypoints(keypoint_data):
 
         current_sequences[session_id] = []
 
+
 @socketio.on('delete_word')
 def handle_delete():
     session_id = request.sid
@@ -108,6 +111,7 @@ def handle_delete():
         predicted_sentences[session_id].pop()
     if session_id in current_sequences:
         current_sequences[session_id] = []
+
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -118,5 +122,6 @@ def handle_disconnect():
         del predicted_sentences[session_id]
     print(f"Client disconnected. Session ID: {session_id}")
 
+
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
