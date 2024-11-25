@@ -162,8 +162,8 @@
                     Start (S)
                 </button>
                 <!-- <button onclick="retryPrediction()" class="button2" id="retryBtn">
-                                    Retry (R)
-                                </button> -->
+                    Retry (R)
+                </button> -->
                 <button onclick="finishCapture()" class="button3" id="finishBtn">
                     Finish (F)
                 </button>
@@ -197,12 +197,12 @@
 
     <script type="text/javascript">
         var socket = io.connect(
-            window.location.cation.port
+            window.location.protocol + "//" + document.domain + ":" + location.port
         );
         const videoElement = document.querySelector("#videoElement");
         const canvasElement = document.querySelector("#canvas");
         const canvasCtx = canvasElement.getContext("2d");
-        const status = document.getElem            "status");
+        const status = document.getElementById("status");
         let isStarted = false;
         let handsPresent = false;
         let holistic = null;
@@ -378,7 +378,7 @@
         }
 
         function updatePredictionBars(predictions) {
-                        t c                    CA                219                FFC107"];
+            const colors = ["#4CAF50", "#2196F3", "#FFC107"];
             predictions.forEach((pred, i) => {
                 const bar = document.getElementById(`pred${i + 1}`);
                 const label = document.getElementById(`label${i + 1}`);
@@ -391,28 +391,28 @@
         }
 
         socket.on("predictions", function (data) {
-            if (data.hasOwnProperty            present")) {
-            if (data.hands_present && !handsPresent) {
-                // Hands just entered the frame
-                handsPresent = true;
-                status.textContent = "Hands detected - Recording...";
-            } else if (!data.hands_present && handsPresent) {
-                // Hands just left the frame
-                handsPresent = false;
-                status.textContent = "No hands detected - Waiting...";
+            if (data.hasOwnProperty("hands_present")) {
+                if (data.hands_present && !handsPresent) {
+                    // Hands just entered the frame
+                    handsPresent = true;
+                    status.textContent = "Hands detected - Recording...";
+                } else if (!data.hands_present && handsPresent) {
+                    // Hands just left the frame
+                    handsPresent = false;
+                    status.textContent = "No hands detected - Waiting...";
+                }
             }
-        }
 
             if (data.predictions) {
-            updatePredictionBars(data.predictions);
-        }
-        if (data.sentence) {
-            document.getElementById("result").value = data.sentence;
-        }
+                updatePredictionBars(data.predictions);
+            }
+            if (data.sentence) {
+                document.getElementById("result").value = data.sentence;
+            }
         });
 
         document.addEventListener("keydown", function (event) {
-            switch (event.key.toL()) {
+            switch (event.key.toLowerCase()) {
                 case "s":
                     startCapture();
                     break;
