@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <title>Sign Language Translator</title>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-    <script src='https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.0/socket.io.min.js'></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.0/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -93,7 +94,9 @@
             resize: none;
         }
 
-        .button, .button2, .button3 {
+        .button,
+        .button2,
+        .button3 {
             padding: 8px 15px;
             border-radius: 5px;
             text-decoration: none;
@@ -104,14 +107,29 @@
             font-size: 14px;
         }
 
-        .button { background-color: #4CAF50; }
-        .button:hover { background-color: #45a049; }
+        .button {
+            background-color: #4caf50;
+        }
 
-        .button2 { background-color: #f44336; }
-        .button2:hover { background-color: #da190b; }
+        .button:hover {
+            background-color: #45a049;
+        }
 
-        .button3 { background-color: #2196F3; }
-        .button3:hover { background-color: #0b7dda; }
+        .button2 {
+            background-color: #f44336;
+        }
+
+        .button2:hover {
+            background-color: #da190b;
+        }
+
+        .button3 {
+            background-color: #2196f3;
+        }
+
+        .button3:hover {
+            background-color: #0b7dda;
+        }
 
         .status-indicator {
             position: absolute;
@@ -134,14 +152,21 @@
         }
     </style>
 </head>
+
 <body>
     <div class="ex-layout">
         <div class="gnb">
             Sign Language Translator
             <div class="item last">
-                <button onclick="startCapture()" class="button" id="startBtn">Start (S)</button>
-                <!-- <button onclick="retryPrediction()" class="button2" id="retryBtn">Retry (R)</button> -->
-                <button onclick="finishCapture()" class="button3" id="finishBtn">Finish (F)</button>
+                <button onclick="startCapture()" class="button" id="startBtn">
+                    Start (S)
+                </button>
+                <!-- <button onclick="retryPrediction()" class="button2" id="retryBtn">
+                                    Retry (R)
+                                </button> -->
+                <button onclick="finishCapture()" class="button3" id="finishBtn">
+                    Finish (F)
+                </button>
             </div>
         </div>
         <div class="main">
@@ -171,12 +196,15 @@
     </div>
 
     <script type="text/javascript">
-        var socket = io.connect(window.location.protocol + '//' + document.domain + ':' + location.port);
+        var socket = io.connect(
+            window.location.cation.port
+        );
         const videoElement = document.querySelector("#videoElement");
         const canvasElement = document.querySelector("#canvas");
         const canvasCtx = canvasElement.getContext("2d");
-        const status = document.getElementById('status');
+        const status = document.getElem            "status");
         let isStarted = false;
+        let handsPresent = false;
         let holistic = null;
 
         canvasElement.width = 640;
@@ -187,60 +215,102 @@
 
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(
+                results.image,
+                0,
+                0,
+                canvasElement.width,
+                canvasElement.height
+            );
 
             // Draw face landmarks
             if (results.faceLandmarks) {
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_TESSELATION,
-                    {color: '#C0C0C070', lineWidth: 1});
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_RIGHT_EYE,
-                    {color: '#FF3030'});
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_RIGHT_EYEBROW,
-                    {color: '#FF3030'});
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LEFT_EYE,
-                    {color: '#30FF30'});
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LEFT_EYEBROW,
-                    {color: '#30FF30'});
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_FACE_OVAL,
-                    {color: '#E0E0E0'});
-                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LIPS,
-                    {color: '#E0E0E0'});
+                drawConnectors(
+                    canvasCtx,
+                    results.faceLandmarks,
+                    FACEMESH_TESSELATION,
+                    { color: "#C0C0C070", lineWidth: 1 }
+                );
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_RIGHT_EYE, {
+                    color: "#FF3030",
+                });
+                drawConnectors(
+                    canvasCtx,
+                    results.faceLandmarks,
+                    FACEMESH_RIGHT_EYEBROW,
+                    { color: "#FF3030" }
+                );
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LEFT_EYE, {
+                    color: "#30FF30",
+                });
+                drawConnectors(
+                    canvasCtx,
+                    results.faceLandmarks,
+                    FACEMESH_LEFT_EYEBROW,
+                    { color: "#30FF30" }
+                );
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_FACE_OVAL, {
+                    color: "#E0E0E0",
+                });
+                drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_LIPS, {
+                    color: "#E0E0E0",
+                });
             }
 
             // Draw pose
             if (results.poseLandmarks) {
-                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
-                    {color: '#00FF00', lineWidth: 4});
-                drawLandmarks(canvasCtx, results.poseLandmarks,
-                    {color: '#FF0000', lineWidth: 2});
+                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {
+                    color: "#00FF00",
+                    lineWidth: 4,
+                });
+                drawLandmarks(canvasCtx, results.poseLandmarks, {
+                    color: "#FF0000",
+                    lineWidth: 2,
+                });
             }
 
             // Draw hands
             if (results.leftHandLandmarks) {
-                drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS,
-                    {color: '#CC0000', lineWidth: 5});
-                drawLandmarks(canvasCtx, results.leftHandLandmarks,
-                    {color: '#00FF00', lineWidth: 2});
+                drawConnectors(
+                    canvasCtx,
+                    results.leftHandLandmarks,
+                    HAND_CONNECTIONS,
+                    { color: "#CC0000", lineWidth: 5 }
+                );
+                drawLandmarks(canvasCtx, results.leftHandLandmarks, {
+                    color: "#00FF00",
+                    lineWidth: 2,
+                });
             }
             if (results.rightHandLandmarks) {
-                drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS,
-                    {color: '#00CC00', lineWidth: 5});
-                drawLandmarks(canvasCtx, results.rightHandLandmarks,
-                    {color: '#FF0000', lineWidth: 2});
+                drawConnectors(
+                    canvasCtx,
+                    results.rightHandLandmarks,
+                    HAND_CONNECTIONS,
+                    { color: "#00CC00", lineWidth: 5 }
+                );
+                drawLandmarks(canvasCtx, results.rightHandLandmarks, {
+                    color: "#FF0000",
+                    lineWidth: 2,
+                });
             }
 
             canvasCtx.restore();
 
             // Extract and send keypoints
-            if (results.faceLandmarks || results.leftHandLandmarks || 
-                results.rightHandLandmarks || results.poseLandmarks) {
+            if (
+                results.faceLandmarks ||
+                results.leftHandLandmarks ||
+                results.rightHandLandmarks ||
+                results.poseLandmarks
+            ) {
                 const keypoints = {
                     face: results.faceLandmarks || [],
                     pose: results.poseLandmarks || [],
                     leftHand: results.leftHandLandmarks || [],
-                    rightHand: results.rightHandLandmarks || []
+                    rightHand: results.rightHandLandmarks || [],
                 };
-                socket.emit('keypoints', keypoints);
+                socket.emit("keypoints", keypoints);
             }
         }
 
@@ -249,14 +319,14 @@
                 holistic = new Holistic({
                     locateFile: (file) => {
                         return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
-                    }
+                    },
                 });
 
                 holistic.setOptions({
                     modelComplexity: 1,
                     smoothLandmarks: true,
                     minDetectionConfidence: 0.5,
-                    minTrackingConfidence: 0.5
+                    minTrackingConfidence: 0.5,
                 });
 
                 holistic.onResults(onResults);
@@ -264,18 +334,19 @@
                 const camera = new Camera(videoElement, {
                     onFrame: async () => {
                         if (isStarted) {
-                            await holistic.send({image: videoElement});
+                            await holistic.send({ image: videoElement });
                         }
                     },
                     width: 640,
-                    height: 480
+                    height: 480,
                 });
 
-                camera.start()
+                camera
+                    .start()
                     .then(() => {
                         isStarted = true;
-                        status.textContent = "Recording...";
-                        document.getElementById('result').value = "Translation started.";
+                        status.textContent = "Waiting for hands...";
+                        document.getElementById("result").value = "Translation started.";
                     })
                     .catch((error) => {
                         console.error("Error starting camera:", error);
@@ -285,7 +356,7 @@
         }
 
         function retryPrediction() {
-            socket.emit('delete_word');
+            socket.emit("delete_word");
             status.textContent = "Retrying...";
         }
 
@@ -296,54 +367,70 @@
                     holistic.close();
                 }
                 const tracks = videoElement.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
+                tracks.forEach((track) => track.stop());
                 videoElement.srcObject = null;
                 status.textContent = "Finished";
-                console.log("Final sentence:", document.getElementById('result').value);
+                console.log(
+                    "Final sentence:",
+                    document.getElementById("result").value
+                );
             }
         }
 
         function updatePredictionBars(predictions) {
-            const colors = ['#4CAF50', '#2196F3', '#FFC107'];
+                        t c                    CA                219                FFC107"];
             predictions.forEach((pred, i) => {
-                const bar = document.getElementById(`pred${i+1}`);
-                const label = document.getElementById(`label${i+1}`);
+                const bar = document.getElementById(`pred${i + 1}`);
+                const label = document.getElementById(`label${i + 1}`);
                 const width = pred.probability * 100;
-                
-                bar.style.width = width + '%';
+
+                bar.style.width = width + "%";
                 bar.style.backgroundColor = colors[i];
                 label.textContent = `${pred.word} (${width.toFixed(1)}%)`;
             });
         }
 
-        socket.on('predictions', function(data) {
+        socket.on("predictions", function (data) {
+            if (data.hasOwnProperty            present")) {
+            if (data.hands_present && !handsPresent) {
+                // Hands just entered the frame
+                handsPresent = true;
+                status.textContent = "Hands detected - Recording...";
+            } else if (!data.hands_present && handsPresent) {
+                // Hands just left the frame
+                handsPresent = false;
+                status.textContent = "No hands detected - Waiting...";
+            }
+        }
+
             if (data.predictions) {
-                updatePredictionBars(data.predictions);
-            }
-            if (data.sentence) {
-                document.getElementById('result').value = data.sentence;
-            }
+            updatePredictionBars(data.predictions);
+        }
+        if (data.sentence) {
+            document.getElementById("result").value = data.sentence;
+        }
         });
 
-        document.addEventListener('keydown', function(event) {
-            switch(event.key.toLowerCase()) {
-                case 's':
+        document.addEventListener("keydown", function (event) {
+            switch (event.key.toL()) {
+                case "s":
                     startCapture();
                     break;
-                case 'r':
+                case "r":
                     retryPrediction();
                     break;
-                case 'f':
+                case "f":
                     finishCapture();
                     break;
             }
         });
 
-        window.onbeforeunload = function() {
+        window.onbeforeunload = function () {
             if (isStarted) {
                 finishCapture();
             }
         };
     </script>
 </body>
+
 </html>

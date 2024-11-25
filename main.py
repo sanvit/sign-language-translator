@@ -22,7 +22,6 @@ ORD2SIGN2 = {0: 'here', 1: 'there', 2: 'go', 3: 'time', 4: 'correct', 5: 'taxi',
              46: 'use', 47: 'impossible', 48: 'airport', 49: 'alley', 50: 'okay', 51: 'City Hall',
              52: 'turn on', 53: 'vending machine', 54: 'die'}
 
-LENGTH = 30
 current_sequences = {}
 predicted_sentences = {}
 
@@ -72,13 +71,9 @@ def handle_keypoints(keypoint_data):
     # Format keypoints
     keypoints = format_keypoints(keypoint_data)
 
-    # Add to sequence
-    current_sequences[session_id].append(keypoints)
-    current_sequences[session_id] = current_sequences[session_id][-LENGTH:]
-
-    # Process sequence if it's complete
-    if len(current_sequences[session_id]) == LENGTH:
-        sequence_np = np.array(current_sequences[session_id], dtype=np.float32)
+    # Process if hands are present in the frame
+    if any(keypoint_data['leftHand']) or any(keypoint_data['rightHand']):
+        sequence_np = np.array([keypoints], dtype=np.float32)
         prediction = prediction_fn(inputs=sequence_np)
 
         top3_words, top3_probs = get_top3(prediction)
@@ -98,10 +93,14 @@ def handle_keypoints(keypoint_data):
             emit('predictions', {
                 'predictions': predictions,
                 'final_word': most_likely_word,
-                'sentence': ' '.join(predicted_sentences[session_id])
+                'sentence': ' '.join(predicted_sentences[session_id]),
+                'hands_present': True
             })
-
-        current_sequences[session_id] = []
+    else:
+        # Emit event indicating no hands present
+        emit('predictions', {
+            'hands_present': False
+        })
 
 
 @socketio.on('delete_word')
@@ -124,4 +123,5 @@ def handle_disconnect():
 
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True, host="0.0.0.0")
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True,
+                 host="0.0.0.0", port=5001)
