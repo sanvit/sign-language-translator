@@ -77,10 +77,10 @@ def handle_keypoints(keypoint_data):
 
     # Process if hands are present in the frame
     if any(keypoint_data['leftHand']) or any(keypoint_data['rightHand']):
-        
+
         sequence.append(keypoints)
         sequence_cut = sequence[-MIN_LENGTH:]
-        
+
         # 이하 코드는 실시간으로 보이는 확률을 화면에 보여주기 위해 쓴 부분
         sequence_np = np.array(sequence_cut, dtype=np.float32)
         prediction = prediction_fn(inputs=sequence_np)
@@ -98,7 +98,7 @@ def handle_keypoints(keypoint_data):
             'predictions': predictions,
             'hands_present': True
         })
-        
+
     # Predict the word if hand is not in the frame
     else:
 
@@ -107,27 +107,25 @@ def handle_keypoints(keypoint_data):
             sequence_np = np.array(sequence, dtype=np.float32)
             prediction = prediction_fn(inputs=sequence_np)
             most_likely_word = ORD2SIGN2[prediction['outputs'].argmax()]
-            
+
             # Thresholding
-            if prediction['outputs'].max() > 1.5: 
+            if prediction['outputs'].max() > 1.5:
 
                 if not predicted_sentences[session_id] or most_likely_word != predicted_sentences[session_id][-1]:
-                    
+
                     predicted_sentences[session_id].append(most_likely_word)
-                    
+
                     emit('predictions', {
-                    'final_word': most_likely_word,
-                    'sentence': ' '.join(predicted_sentences[session_id])
+                        'final_word': most_likely_word,
+                        'sentence': ' '.join(predicted_sentences[session_id])
                     })
 
-        
-        sequence.clear() # sequence 제거
-        
+        sequence.clear()  # sequence 제거
+
         # Emit event indicating no hands present
         emit('predictions', {
             'hands_present': False
         })
-
 
 
 @socketio.on('delete_word')
@@ -135,7 +133,7 @@ def handle_delete():
     session_id = request.sid
     if session_id in predicted_sentences and len(predicted_sentences[session_id]) > 1:
         predicted_sentences[session_id].pop()
-        
+
         # After popping element from the list, join them into string
         emit('predictions', {
             'sentence': ' '.join(predicted_sentences[session_id])

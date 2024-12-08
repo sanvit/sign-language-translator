@@ -161,9 +161,9 @@
                 <button onclick="startCapture()" class="button" id="startBtn">
                     Start (S)
                 </button>
-                <!-- <button onclick="retryPrediction()" class="button2" id="retryBtn">
+                <button onclick="retryPrediction()" class="button2" id="retryBtn">
                     Retry (R)
-                </button> -->
+                </button>
                 <button onclick="finishCapture()" class="button3" id="finishBtn">
                     Finish (F)
                 </button>
@@ -206,6 +206,7 @@
         let isStarted = false;
         let handsPresent = false;
         let holistic = null;
+        let framesCollected = 0;
 
         canvasElement.width = 640;
         canvasElement.height = 480;
@@ -357,6 +358,7 @@
 
         function retryPrediction() {
             socket.emit("delete_word");
+            framesCollected = 0;
             status.textContent = "Retrying...";
         }
 
@@ -370,6 +372,7 @@
                 tracks.forEach((track) => track.stop());
                 videoElement.srcObject = null;
                 status.textContent = "Finished";
+                framesCollected = 0;
                 console.log(
                     "Final sentence:",
                     document.getElementById("result").value
@@ -392,14 +395,20 @@
 
         socket.on("predictions", function (data) {
             if (data.hasOwnProperty("hands_present")) {
-                if (data.hands_present && !handsPresent) {
-                    // Hands just entered the frame
+                if (data.hands_present) {
                     handsPresent = true;
-                    status.textContent = "Hands detected - Recording...";
-                } else if (!data.hands_present && handsPresent) {
-                    // Hands just left the frame
+                    if (data.collecting) {
+                        framesCollected = data.frames_collected;
+                        status.textContent = `Recording... Frames: ${framesCollected}`;
+                    }
+                } else {
                     handsPresent = false;
-                    status.textContent = "No hands detected - Waiting...";
+                    if (data.prediction_made) {
+                        status.textContent = "Prediction made - Waiting for new gesture...";
+                        framesCollected = 0;
+                    } else {
+                        status.textContent = `Paused - Frames collected: ${data.frames_collected}`;
+                    }
                 }
             }
 
