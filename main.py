@@ -63,7 +63,7 @@ def index():
 def handle_connect():
     session_id = request.sid
     current_sequences[session_id] = []
-    predicted_sentences[session_id] = ["Start"]
+    predicted_sentences[session_id] = []
     print(f"New client connected. Session ID: {session_id}")
 
 
@@ -81,7 +81,7 @@ def handle_keypoints(keypoint_data):
         sequence.append(keypoints)
         sequence_cut = sequence[-MIN_LENGTH:]
         
-        # 이것은 실시간으로 보이는 확률을 화면에 보여주기 위해 쓴 부분
+        # 이하 코드는 실시간으로 보이는 확률을 화면에 보여주기 위해 쓴 부분
         sequence_np = np.array(sequence_cut, dtype=np.float32)
         prediction = prediction_fn(inputs=sequence_np)
 
@@ -99,24 +99,26 @@ def handle_keypoints(keypoint_data):
             'hands_present': True
         })
         
+    # Predict the word if hand is not in the frame
+    else:
 
-   
-    else:  # 손이 빠지면 최소 프레임 수가 넘을 때 전체 sequence로 prediction해서 문장에 추가
-
+        # 최소 프레임 길이를 넘으면 전체 sequence를 prediction function에 넣어서 예측 후 문장에 추가
         if len(sequence) >= MIN_LENGTH:
             sequence_np = np.array(sequence, dtype=np.float32)
             prediction = prediction_fn(inputs=sequence_np)
+            most_likely_word = ORD2SIGN2[prediction['outputs'].argmax()]
             
-            if prediction['outputs'].max() > 1.5: # Threshold for criteria
-                
-                most_likely_word = ORD2SIGN2[prediction['outputs'].argmax()]
-                
-                if most_likely_word != predicted_sentences[session_id][-1]:
+            # Thresholding
+            if prediction['outputs'].max() > 1.5: 
+
+                if not predicted_sentences[session_id] or most_likely_word != predicted_sentences[session_id][-1]:
+                    
                     predicted_sentences[session_id].append(most_likely_word)
                     
                     emit('predictions', {
                     'final_word': most_likely_word,
-                    'sentence': ' '.join(predicted_sentences[session_id])})
+                    'sentence': ' '.join(predicted_sentences[session_id])
+                    })
 
         
         sequence.clear() # sequence 제거
@@ -133,6 +135,12 @@ def handle_delete():
     session_id = request.sid
     if session_id in predicted_sentences and len(predicted_sentences[session_id]) > 1:
         predicted_sentences[session_id].pop()
+        
+        # After popping element from the list, join them into string
+        emit('predictions', {
+            'sentence': ' '.join(predicted_sentences[session_id])
+        })
+
     if session_id in current_sequences:
         current_sequences[session_id] = []
 
