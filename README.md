@@ -1,5 +1,5 @@
 # Korean Sign-Language-Translator
-
+수어 번역기 - 졸업설계작품
 <br>
 <hr>
 
