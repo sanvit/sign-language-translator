@@ -10,6 +10,9 @@ socketio = SocketIO(app, cors_allowed_origins='*')
 interpreter = tf.lite.Interpreter(model_path="model_fold0_55.tflite")
 prediction_fn = interpreter.get_signature_runner("serving_default")
 
+MIN_LENGTH = 20
+sequence = []
+
 # Sign language labels
 ORD2SIGN2 = {0: 'here', 1: 'there', 2: 'go', 3: 'time', 4: 'correct', 5: 'taxi', 6: 'money',
              7: 'confirm', 8: 'become', 9: 'card', 10: 'subway', 11: 'Myeongdong', 12: 'Songpa',
@@ -60,12 +63,13 @@ def index():
 def handle_connect():
     session_id = request.sid
     current_sequences[session_id] = []
-    predicted_sentences[session_id] = ["Start"]
+    predicted_sentences[session_id] = []
     print(f"New client connected. Session ID: {session_id}")
 
 
 @socketio.on('keypoints')
 def handle_keypoints(keypoint_data):
+    global sequence
     session_id = request.sid
 
     # Format keypoints
@@ -73,7 +77,12 @@ def handle_keypoints(keypoint_data):
 
     # Process if hands are present in the frame
     if any(keypoint_data['leftHand']) or any(keypoint_data['rightHand']):
-        sequence_np = np.array([keypoints], dtype=np.float32)
+        
+        sequence.append(keypoints)
+        sequence_cut = sequence[-MIN_LENGTH:]
+        
+        # 이하 코드는 실시간으로 보이는 확률을 화면에 보여주기 위해 쓴 부분
+        sequence_np = np.array(sequence_cut, dtype=np.float32)
         prediction = prediction_fn(inputs=sequence_np)
 
         top3_words, top3_probs = get_top3(prediction)
@@ -85,22 +94,40 @@ def handle_keypoints(keypoint_data):
                 'probability': float(prob)
             })
 
-        if prediction['outputs'].max() > 1:  # Confidence threshold
-            most_likely_word = top3_words[0]
-            if most_likely_word != predicted_sentences[session_id][-1]:
-                predicted_sentences[session_id].append(most_likely_word)
-
-            emit('predictions', {
-                'predictions': predictions,
-                'final_word': most_likely_word,
-                'sentence': ' '.join(predicted_sentences[session_id]),
-                'hands_present': True
-            })
+        emit('predictions', {
+            'predictions': predictions,
+            'hands_present': True
+        })
+        
+    # Predict the word if hand is not in the frame
     else:
+
+        # 최소 프레임 길이를 넘으면 전체 sequence를 prediction function에 넣어서 예측 후 문장에 추가
+        if len(sequence) >= MIN_LENGTH:
+            sequence_np = np.array(sequence, dtype=np.float32)
+            prediction = prediction_fn(inputs=sequence_np)
+            most_likely_word = ORD2SIGN2[prediction['outputs'].argmax()]
+            
+            # Thresholding
+            if prediction['outputs'].max() > 1.5: 
+
+                if not predicted_sentences[session_id] or most_likely_word != predicted_sentences[session_id][-1]:
+                    
+                    predicted_sentences[session_id].append(most_likely_word)
+                    
+                    emit('predictions', {
+                    'final_word': most_likely_word,
+                    'sentence': ' '.join(predicted_sentences[session_id])
+                    })
+
+        
+        sequence.clear() # sequence 제거
+        
         # Emit event indicating no hands present
         emit('predictions', {
             'hands_present': False
         })
+
 
 
 @socketio.on('delete_word')
@@ -108,6 +135,12 @@ def handle_delete():
     session_id = request.sid
     if session_id in predicted_sentences and len(predicted_sentences[session_id]) > 1:
         predicted_sentences[session_id].pop()
+        
+        # After popping element from the list, join them into string
+        emit('predictions', {
+            'sentence': ' '.join(predicted_sentences[session_id])
+        })
+
     if session_id in current_sequences:
         current_sequences[session_id] = []
 
