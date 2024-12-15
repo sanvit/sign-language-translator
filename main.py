@@ -27,10 +27,24 @@ ORD2SIGN2 = {0: 'here', 1: 'there', 2: 'go', 3: 'time', 4: 'correct', 5: 'taxi',
 
 current_sequences = {}
 predicted_sentences = {}
+last_hand_positions = {}
+
+
+def is_hand_at_edge(keypoint_data):
+    # Check if hands are near the edge of the frame (assuming normalized coordinates 0-1)
+    edge_threshold = 0.1
+
+    for hand in ['leftHand', 'rightHand']:
+        if keypoint_data[hand]:
+            for point in keypoint_data[hand]:
+                x, y = point.get('x', 0), point.get('y', 0)
+                if (x < edge_threshold or x > (1 - edge_threshold) or
+                        y < edge_threshold or y > (1 - edge_threshold)):
+                    return True
+    return False
 
 
 def format_keypoints(keypoint_data):
-    # Convert the received keypoint data into the format expected by the model
     face = [[point.get('x'), point.get('y'), point.get('z')] for point in keypoint_data['face']
             ] if keypoint_data['face'] else [[None, None, None] for _ in range(468)]
     pose = [[point.get('x'), point.get('y'), point.get('z')] for point in keypoint_data['pose']
@@ -46,11 +60,7 @@ def get_top3(prediction):
     top3_idx = np.argsort(prediction['outputs'])[-3:][::-1]
     top3_probs = np.exp(prediction['outputs'][top3_idx]) / \
         np.sum(np.exp(prediction['outputs']))
-
-    top3_words = []
-    for idx in top3_idx:
-        top3_words.append(ORD2SIGN2[idx])
-
+    top3_words = [ORD2SIGN2[idx] for idx in top3_idx]
     return top3_words, top3_probs
 
 
@@ -64,83 +74,79 @@ def handle_connect():
     session_id = request.sid
     current_sequences[session_id] = []
     predicted_sentences[session_id] = []
+    last_hand_positions[session_id] = False
     print(f"New client connected. Session ID: {session_id}")
 
 
 @socketio.on('keypoints')
 def handle_keypoints(keypoint_data):
-    global sequence
     session_id = request.sid
+    hands_present = any(keypoint_data['leftHand']) or any(
+        keypoint_data['rightHand'])
+    at_edge = is_hand_at_edge(keypoint_data)
 
     # Format keypoints
     keypoints = format_keypoints(keypoint_data)
 
-    # Process if hands are present in the frame
-    if any(keypoint_data['leftHand']) or any(keypoint_data['rightHand']):
-
+    if hands_present:
+        # Store the sequence when hands are present
         sequence.append(keypoints)
-        sequence_cut = sequence[-MIN_LENGTH:]
+        last_hand_positions[session_id] = at_edge
 
-        # 이하 코드는 실시간으로 보이는 확률을 화면에 보여주기 위해 쓴 부분
-        sequence_np = np.array(sequence_cut, dtype=np.float32)
-        prediction = prediction_fn(inputs=sequence_np)
-
-        top3_words, top3_probs = get_top3(prediction)
-
-        predictions = []
-        for word, prob in zip(top3_words, top3_probs):
-            predictions.append({
-                'word': word,
-                'probability': float(prob)
-            })
-
-        emit('predictions', {
-            'predictions': predictions,
-            'hands_present': True
-        })
-
-    # Predict the word if hand is not in the frame
-    else:
-
-        # 최소 프레임 길이를 넘으면 전체 sequence를 prediction function에 넣어서 예측 후 문장에 추가
+        # Show real-time predictions
         if len(sequence) >= MIN_LENGTH:
-            sequence_np = np.array(sequence, dtype=np.float32)
+            sequence_cut = sequence[-MIN_LENGTH:]
+            sequence_np = np.array(sequence_cut, dtype=np.float32)
             prediction = prediction_fn(inputs=sequence_np)
-            most_likely_word = ORD2SIGN2[prediction['outputs'].argmax()]
+            top3_words, top3_probs = get_top3(prediction)
 
-            # Thresholding
-            if prediction['outputs'].max() > 1.5:
+            predictions = [{'word': word, 'probability': float(prob)}
+                           for word, prob in zip(top3_words, top3_probs)]
 
-                if not predicted_sentences[session_id] or most_likely_word != predicted_sentences[session_id][-1]:
+            emit('predictions', {
+                'predictions': predictions,
+                'hands_present': True,
+                'collecting': True,
+                'frames_collected': len(sequence)
+            })
+    else:
+        # Check if we should make a prediction
+        if len(sequence) >= MIN_LENGTH:
+            was_at_edge = last_hand_positions[session_id]
 
-                    predicted_sentences[session_id].append(most_likely_word)
+            if was_at_edge:  # Only predict if hands were last seen at the edge
+                sequence_np = np.array(sequence, dtype=np.float32)
+                prediction = prediction_fn(inputs=sequence_np)
+                most_likely_word = ORD2SIGN2[prediction['outputs'].argmax()]
 
-                    emit('predictions', {
-                        'final_word': most_likely_word,
-                        'sentence': ' '.join(predicted_sentences[session_id])
-                    })
+                if prediction['outputs'].max() > 1.5:
+                    if not predicted_sentences[session_id] or most_likely_word != predicted_sentences[session_id][-1]:
+                        predicted_sentences[session_id].append(
+                            most_likely_word)
+                        emit('predictions', {
+                            'final_word': most_likely_word,
+                            'sentence': ' '.join(predicted_sentences[session_id]),
+                            'hands_present': False,
+                            'prediction_made': True
+                        })
 
-        sequence.clear()  # sequence 제거
+            sequence.clear()  # Reset sequence after prediction or if not at edge
 
-        # Emit event indicating no hands present
         emit('predictions', {
-            'hands_present': False
+            'hands_present': False,
+            'frames_collected': len(sequence)
         })
 
 
 @socketio.on('delete_word')
 def handle_delete():
     session_id = request.sid
-    if session_id in predicted_sentences and len(predicted_sentences[session_id]) > 1:
+    if session_id in predicted_sentences and predicted_sentences[session_id]:
         predicted_sentences[session_id].pop()
-
-        # After popping element from the list, join them into string
         emit('predictions', {
             'sentence': ' '.join(predicted_sentences[session_id])
         })
-
-    if session_id in current_sequences:
-        current_sequences[session_id] = []
+    sequence.clear()
 
 
 @socketio.on('disconnect')
@@ -150,6 +156,8 @@ def handle_disconnect():
         del current_sequences[session_id]
     if session_id in predicted_sentences:
         del predicted_sentences[session_id]
+    if session_id in last_hand_positions:
+        del last_hand_positions[session_id]
     print(f"Client disconnected. Session ID: {session_id}")
 
 
